@@ -22,7 +22,7 @@ class SequenceGuard {
   bool seen = false;
 };
 struct Settings {
-  float triggerDb = 90, restAngle = 90, pressAngle = 0, doorThresholdCm = 20;
+  float triggerDb = 90, restAngle = 110, pressAngle = 70, doorThresholdCm = 20;
   uint32_t sustainMs = 3000, travelMs = 500, holdMs = 500;
 };
 inline bool valid(const Settings &s) {
@@ -77,7 +77,7 @@ inline const char *phaseName(Phase p) {
 class ServoCycle {
  public:
   Phase phase = Phase::Idle;
-  float angle = 90;
+  float angle = Settings{}.restAngle;
   uint32_t pressCount = 0;
   bool start(uint32_t now, const Settings &s) {
     if (phase != Phase::Idle) return false;

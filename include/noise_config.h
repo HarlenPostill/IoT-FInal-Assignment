@@ -18,7 +18,7 @@ namespace Config {
 constexpr char WIFI_SSID[] = LAB_WIFI_SSID;
 constexpr char WIFI_PASSWORD[] = LAB_WIFI_PASSWORD;
 constexpr char GROUP_ID[] = LAB_GROUP_ID;
-// Lab 9 broker and credentials. InfluxDB credentials belong to Telegraf.
+// MQTT broker and credentials. InfluxDB credentials belong to Telegraf.
 constexpr char MQTT_HOST[] = "broker.emqx.io";
 constexpr uint16_t MQTT_PORT = 1883;
 constexpr char MQTT_USER[] = "emqx";

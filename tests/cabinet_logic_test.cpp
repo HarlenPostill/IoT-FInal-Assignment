@@ -15,7 +15,7 @@ int main() {
   SequenceGuard rollover;
   assert(rollover.accept("0123456789abcdef",UINT32_MAX,restarted));
   assert(rollover.accept("0123456789abcdef",0,restarted) && !restarted);
-  auto bad=s; bad.pressAngle=90; assert(!valid(bad));
+  auto bad=s; bad.pressAngle=s.restAngle; assert(!valid(bad));
   bad=s; bad.doorThresholdCm=NAN; assert(!valid(bad));
   NoiseGate g;
   assert(!g.sample(95,0,s,2500));
@@ -36,11 +36,12 @@ int main() {
   for(uint32_t offset=0;offset<3000;offset+=1000) assert(!wrap.sample(90,UINT32_MAX-1000+offset,s,2500));
   assert(wrap.sample(90,UINT32_MAX-1000+3000,s,2500));
   ServoCycle servo; assert(servo.start(100,s)); assert(!servo.start(200,s));
-  servo.tick(350); assert(std::fabs(servo.angle-45)<.01);
-  servo.tick(600); assert(servo.phase==Phase::Hold && servo.angle==0);
+  assert(servo.angle==110 && s.restAngle-s.pressAngle==40);
+  servo.tick(350); assert(std::fabs(servo.angle-90)<.01);
+  servo.tick(600); assert(servo.phase==Phase::Hold && servo.angle==70);
   servo.tick(1100); assert(servo.phase==Phase::Return);
-  servo.tick(1350); assert(std::fabs(servo.angle-45)<.01);
-  servo.tick(1600); assert(servo.phase==Phase::Idle && servo.angle==90 && servo.pressCount==1);
+  servo.tick(1350); assert(std::fabs(servo.angle-90)<.01);
+  servo.tick(1600); assert(servo.phase==Phase::Idle && servo.angle==110 && servo.pressCount==1);
   // Independent door detection: median rejects one spike, debounce and hysteresis.
   DoorMonitor door;
   for(uint32_t t=0;t<=1200;t+=100) door.sample(t==500?100:10,t,20,2,600);

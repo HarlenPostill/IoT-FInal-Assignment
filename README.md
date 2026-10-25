@@ -1,8 +1,8 @@
 # Building noise monitor and breaker-box controller
 
 The first ESP32 measures sound outside a building, gives immediate feedback on
-eight RGB LEDs, and publishes numeric sound levels and sensor health to the lab
-MQTT broker. Telegraf stores these messages in the existing lab InfluxDB 2.x
+eight RGB LEDs, and publishes numeric sound levels and sensor health to the
+MQTT broker. Telegraf stores these messages in the local Docker InfluxDB 2
 bucket; Grafana presents the trends and state changes. No audio is uploaded.
 The second ESP32 adds an SG90 button presser triggered by sustained noise and an
 independent ultrasonic door monitor. See [second-board wiring, upload and operation](docs/SECOND_BOARD.md).
@@ -26,6 +26,26 @@ All eight LEDs flash together continuously while the red state is active.
 The flash uses a non-blocking timer so microphone sensing and networking continue.
 Adjust `Config::RED_FLASH_HALF_PERIOD_MS` to change the flash speed.
 These are configurable project thresholds, not a hearing-safety classification.
+
+## Assignment project layout
+
+| Path | Assignment component |
+| --- | --- |
+| `src/main.cpp` | Microphone ESP32 firmware: sound processing, LEDs and MQTT |
+| `src/actuator_main.cpp` | Actuator ESP32 firmware: ultrasonic door sensing, servo and MQTT |
+| `include/` | Shared configuration, control logic and local web pages |
+| `platformio.ini` | Build/upload environments for both ESP32s |
+| `cloud/` | Docker services, Telegraf configuration and Grafana dashboards |
+| `tools/mock_microphone/` | Browser interface for testing the actuator without the microphone board |
+| `tools/` | Local setup and end-to-end pipeline checks |
+| `tests/` | Control-logic tests and telemetry fixtures/parser checks |
+| `docs/SECOND_BOARD.md` | Actuator wiring, configuration and demonstration guide |
+| `output/visuals/` | Assignment wiring and system diagrams |
+
+The project contains the assignment only. PlatformIO regenerates `.pio/` when
+building. Local credentials stay in ignored `include/secrets.h` and `cloud/.env`.
+Open **http://localhost:8765** for the mock microphone interface; see the
+[actuator guide](docs/SECOND_BOARD.md#test-without-the-microphone-board) for testing steps.
 
 ## Breadboard wiring
 
@@ -85,7 +105,7 @@ Supply and IN/OUT markings are in
 ## Firmware setup
 
 The project retains `espressif32@7.0.1`, `upesy_wrover`, Arduino ESP32 2.0.17.
-Freenove v1.0.5 is pinned for Arduino 2.x compatibility. MQTT/JSON use lab 9's
+Freenove v1.0.5 is pinned for Arduino 2.x compatibility. MQTT/JSON use
 PubSubClient 2.8 and ArduinoJson 7.2.0.
 
 Your existing ignored `include/secrets.h` is reused. On a new installation,
@@ -124,24 +144,38 @@ on a power cut. Configuration access assumes a trusted demonstration LAN.
 
 **ESP32 → Wi-Fi/Internet → MQTT → Telegraf → InfluxDB → Grafana**
 
-Lab 9's broker is `broker.emqx.io:1883`, user `emqx`, password `public`.
-Lab 10's existing URL, organisation, bucket and token are reused through the
-ignored `cloud/.env`. Unlike lab 10's direct-write firmware, this board does
-not make InfluxDB HTTP writes or use the database token.
+The MQTT broker is `broker.emqx.io:1883`, user `emqx`, password `public`.
+InfluxDB 2, Telegraf and Grafana run locally in Docker. The ESP32s continue
+using the existing MQTT broker; they do not make InfluxDB HTTP writes or need
+the database token. New telemetry goes to the local database. Existing cloud
+history is not copied.
 
 ```sh
-# Already done in this workspace; refuses to overwrite an existing .env.
-python3 tools/configure_cloud.py
+# Generates local credentials; backs up an existing cloud configuration.
+# Safe to repeat: an already configured local .env is preserved.
+python3 tools/configure_cloud.py --local
 # Start Docker Desktop, then:
 docker compose --env-file cloud/.env -f cloud/docker-compose.yml up -d
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml ps
 docker compose --env-file cloud/.env -f cloud/docker-compose.yml logs --tail=30 telegraf
+# Verify both telemetry paths using isolated synthetic devices:
+python3 tools/check_pipeline.py
+python3 tools/check_cabinet_pipeline.py
 ```
 
-For manual setup use `cloud/.env.example`. `INFLUX_TOKEN` needs bucket **write**
-permission; `INFLUX_READ_TOKEN` needs **read** permission. The generated file
-initially uses the lab token for both; replace the read token if needed.
-For a host-machine InfluxDB instance use `http://host.docker.internal:8086`,
-not `localhost`, from inside containers.
+Open **http://localhost:8086** for InfluxDB. Its username and password are
+`INFLUX_ADMIN_USER` and `INFLUX_ADMIN_PASSWORD` in the ignored `cloud/.env`.
+Host scripts use `http://localhost:8086`; containers use `http://influxdb:8086`.
+Both HTTP interfaces bind to localhost. Database data and configuration are
+stored in named Docker volumes and survive restarts and `docker compose down`.
+Use the same Compose flags as above to stop the stack with `down`; avoid
+`down -v` unless you intend to delete the saved database and Grafana data.
+
+For manual setup use `cloud/.env.example`. The generated local setup token is
+used by Telegraf and Grafana for development. Initial InfluxDB credentials are
+applied only to an empty volume; editing `.env` does not reset an existing
+InfluxDB account. Previous configurations are saved in ignored
+`cloud/.env.*.backup` files; `include/secrets.h` is preserved.
 
 Open **http://localhost:3000/d/building-noise**. User: `admin`; password:
 `GRAFANA_ADMIN_PASSWORD` in your local `cloud/.env`. The Flux data source and
@@ -164,8 +198,8 @@ Watch `estimated_spl_db`, `state`, `sensor_ok`, `sequence`, `warning_db` and
 MQTT Explorer observes the data; control thresholds through the ESP32 local
 page. This firmware does not subscribe to MQTT control commands.
 
-To inspect storage independently, log into the lab InfluxDB Cloud account at
-`https://us-east-1-1.aws.cloud2.influxdata.com/`, open Data Explorer, select
+To inspect storage independently, open **http://localhost:8086**, log in using
+your local InfluxDB credentials, open Data Explorer, and select
 `environment_lab`, measurement `noise_monitor`, location `building_exterior`,
 field `estimated_spl_db`, and a recent time range. A Flux equivalent is:
 
@@ -177,8 +211,8 @@ from(bucket: "environment_lab")
   |> filter(fn: (r) => r._field == "estimated_spl_db")
 ```
 
-Both Telegraf and Grafana currently run **on this computer in Docker**, not
-on the ESP32. The EMQX broker and existing InfluxDB bucket are remote services.
+InfluxDB, Telegraf and Grafana run **on this computer in Docker**. The EMQX
+MQTT broker is remote; the database bucket is local.
 Keep this computer, Docker Desktop and Telegraf running for fresh database
 ingestion. Previously stored data remains in InfluxDB when this computer stops.
 
@@ -204,7 +238,7 @@ is possible. An ESP32 publish success is not proof of storage; check the full
 chain. Telegraf timestamps at receipt, not capture; age/sequence expose
 freshness. This is not a lossless recorder.
 
-The public unencrypted broker matches the lab. A real deployment should use a
+The current MQTT broker is public and unencrypted. A real deployment should use a
 private authenticated TLS broker and protected local configuration. Board 2 checks fresh telemetry, sequence/boot updates and connection state; it
 does not use retained status for automatic triggering. See [its guide](docs/SECOND_BOARD.md).
 
@@ -285,6 +319,8 @@ Proposed responsibility split — replace with actual names and work performed:
 Individual videos should explain actual owned code, calculations/protocols,
 design choices, testing and troubleshooting in the full-system context.
 Include the second-board servo logic, door filtering, MQTT subscription and dashboard work in the actual responsibility declaration.
+The [actuator individual video script](docs/INDIVIDUAL_VIDEO_SCRIPT.md) provides
+sentence-by-sentence filming cues and exact code line numbers.
 
 ## Troubleshooting
 
@@ -301,5 +337,3 @@ Include the second-board servo logic, door filtering, MQTT subscription and dash
   token and bucket. `/status` deliberately is not ingested.
 - Grafana no data: check read permission, group/device, range and actual
   `location=building_exterior` samples. Software diagnostics are excluded.
-
-Original labs and mic demo remain in `old main files/`.

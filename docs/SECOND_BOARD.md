@@ -2,15 +2,15 @@
 
 This target is `actuator_board`, implemented in `src/actuator_main.cpp`. The
 microphone remains the `upesy_wrover` target. Both use the same ignored
-`include/secrets.h` Wi-Fi/group settings and Lab 9 broker. Keep Telegraf and
-Grafana running on the computer for cloud storage and display.
+`include/secrets.h` Wi-Fi/group settings and MQTT broker. Keep Telegraf and
+Grafana running on the computer for local database storage and display.
 
 ## Behaviour
 
 | Function | Initial configuration |
 | --- | --- |
 | Servo noise trigger | At least 90 dB for 3 seconds of successive fresh MQTT readings |
-| Default motion | Rest 90° → press 0° over 0.5 s → hold 0.5 s → return 90° over 0.5 s |
+| Default motion | Rest 110° → press 70° over 0.5 s → hold 0.5 s → return 110° over 0.5 s (40° each way) |
 | Repeat protection | One press per noise episode; after returning, 3 seconds below 88 dB rearms |
 | Door | Open above 20 cm; an open door closes at or below 18 cm |
 | Door filtering | Read every 100 ms, median of 5 readings, stable candidate for 600 ms |
@@ -111,10 +111,12 @@ polarity; it does not replace an adequate supply.
 
 SG90 command angles are configurable from 0–180° but actual range varies by
 servo. The firmware uses conservative 50 Hz, 1000–2000 µs PWM. Therefore
-**90° of command change is a starting point, not a calibrated mechanical
+**40° of command change is a starting point, not a calibrated mechanical
 measurement**. Check unloaded travel with the horn removed, then set rest and
 press endpoints to fit your button without stalling. Reverse direction by
-swapping endpoints, for example rest 0° / press 90°. If travel needs pulse
+swapping endpoints, for example rest 70° / press 110°. Existing boards keep
+their saved angles after a firmware upload: set rest to 110° and press to 70°
+on the local configuration page and save to apply this motion. If travel needs pulse
 calibration, edit `SERVO_MIN_US` / `SERVO_MAX_US` in `cabinet_config.h` cautiously
 within the actual servo's specification, then rebuild. Do not force the horn
 against an end stop.
@@ -138,7 +140,7 @@ against an end stop.
 6. Reconnect/power the microphone board so it publishes live readings.
 
 ```sh
-# If pio is not on PATH, use /Users/harlenpostill/.platformio/penv/bin/pio
+# If pio is not on PATH, use ~/.platformio/penv/bin/pio
 pio device list
 pio run -e actuator_board
 # Substitute the actual SECOND board's serial device, not the literal example:
@@ -177,7 +179,7 @@ sustained qualification milliseconds, endpoint/timing settings. Unavailable
 noise/distance values are omitted, not replaced by zero. No audio is sent.
 
 `cloud/telegraf.conf` now has two consumers: the existing `noise_monitor` and
-new **`cabinet_monitor`** measurement. Both write the existing lab bucket,
+**`cabinet_monitor`** measurement. Both write the local InfluxDB bucket,
 using different MQTT client IDs. Influx uses Telegraf receipt timestamps.
 Refresh Grafana to see **IoT project → Breaker box door and button controller**:
 
@@ -196,10 +198,10 @@ appears until this firmware is uploaded and running.
 If bringing the stack up later:
 
 ```sh
-docker compose -f cloud/docker-compose.yml up -d
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml up -d
 # After changing Telegraf schema:
-docker compose -f cloud/docker-compose.yml restart telegraf
-docker compose -f cloud/docker-compose.yml logs --tail 30 telegraf
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml restart telegraf
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml logs --tail 30 telegraf
 ```
 
 Influx Data Explorer example:
@@ -210,6 +212,31 @@ from(bucket: "environment_lab")
   |> filter(fn: (r) => r._measurement == "cabinet_monitor" and r.location == "breaker_box")
   |> filter(fn: (r) => r._field == "distance_cm" or r._field == "door_state_code" or r._field == "press_count")
 ```
+
+## Test without the microphone board
+
+Open **http://localhost:8765** for the mock microphone interface. It starts with
+publishing stopped. If needed, launch it with:
+
+```sh
+docker compose --env-file cloud/.env -f cloud/docker-compose.yml up -d mock-microphone
+```
+
+Keep the real microphone off while the mock is running. Select 65 dB and Start
+for a fresh reading every second. Select 100 dB to test the default sustained
+noise trigger. After the servo returns, select 65 dB for at least 4 seconds to
+rearm, then try high noise again. Stop tests the stale-reading path; Sensor
+fault tests invalid readings. The page shows the actuator's real MQTT feedback,
+including freshness, servo phase, armed status and press count.
+
+The mock reads the source device and broker from the firmware configuration
+headers, and the group from Compose settings. It publishes unretained telemetry
+with a fresh 16-character boot ID, increasing sequence and zero sample age.
+Mock payloads include `simulated: true` and firmware `mock-interface-1.0`, but
+use the real source identity and location required by the actuator. Consequently
+they also appear in the normal Grafana noise dashboard and local database.
+The stream continues with the tab closed; press Stop before using the real
+microphone. Restarting the container always starts with publishing stopped.
 
 ## Demonstration and verification
 

@@ -8,4 +8,8 @@ tmp/
 
 **/secrets.h
 cloud/.env
+cloud/.env.*.backup
 **/__pycache__/
+
+# macOS metadata
+.DS_Store

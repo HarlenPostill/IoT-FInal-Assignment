@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mock microphone</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;color:#e9eef5;background:#10151d}*{box-sizing:border-box}body{margin:0}main{max-width:800px;margin:36px auto;padding:0 20px 40px}h1{font-size:30px;letter-spacing:-1px;margin:4px 0 10px}h2{font-size:16px;margin:0 0 18px}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:2px;color:#73dbc5}.muted,small{color:#a7b4c5;line-height:1.5}.note{border-left:3px solid #f0be6c;padding:10px 14px;background:#27231d;border-radius:4px;line-height:1.5;font-size:14px;margin:22px 0}.panel{background:#19222f;border:1px solid #2b394b;border-radius:14px;padding:22px;margin:16px 0}.row{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}.badge{border-radius:20px;background:#2b3645;padding:6px 12px;font-size:13px}.badge.live{background:#163e36;color:#7ee6ca}.level{font-size:52px;letter-spacing:-2px;font-weight:650}.unit{font-size:20px;color:#a7b4c5;letter-spacing:0}input[type=range]{width:100%;margin:22px 0;accent-color:#73dbc5}button{font:inherit;cursor:pointer;padding:11px 17px;border-radius:8px;border:1px solid #41516a;background:#253348;color:#edf4ff}button:hover{background:#344760}button:disabled{opacity:.5;cursor:wait}.primary{background:#79e0c8;color:#092a24;border-color:#79e0c8;font-weight:650}.primary:hover{background:#a4f1de}.stop{border-color:#d38484;color:#ffb7b7}.buttons{display:flex;gap:10px;flex-wrap:wrap}.preset{flex:1;min-width:100px;text-align:left}.preset small{display:block;margin-top:4px}label{display:flex;gap:10px;align-items:center;margin:18px 0}input[type=checkbox]{width:18px;height:18px;accent-color:#73dbc5}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.metric{font-size:22px;margin:6px 0}.error{color:#ffb7b7;white-space:pre-wrap}code{font-size:12px;overflow-wrap:anywhere}summary{cursor:pointer;color:#a7b4c5}pre{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto}ol{padding-left:20px;line-height:1.7;font-size:14px}@media(max-width:500px){main{margin-top:22px}.grid{grid-template-columns:repeat(2,1fr)}.panel{padding:18px}.level{font-size:42px}}
+</style></head>
+<body><main>
+<div class="eyebrow">Actuator bench test</div><h1>Mock microphone</h1>
+<p class="muted">Stand in for your partner’s ESP32. Send a continuous noise reading, then watch your actuator respond.</p>
+<div class="note">These readings can move your servo. Keep the real microphone off while testing. Mock readings use its source identity and appear in Grafana; payloads are marked <code>simulated: true</code>.</div>
+<section class="panel"><div class="row"><h2>Noise stream</h2><span class="badge" id="stream">Loading…</span></div>
+<div class="row"><label for="level">Noise level</label><div class="level"><output id="db">65</output> <span class="unit">dB</span></div></div>
+<input id="level" aria-label="Noise level in dB" type="range" min="30" max="120" step="1" value="65">
+<div class="buttons"><button class="preset" data-level="65">65 dB<small>Quiet / rearm</small></button><button class="preset" data-level="85">85 dB<small>Below default trigger</small></button><button class="preset" data-level="100">100 dB<small>Above default trigger</small></button></div>
+<label><input type="checkbox" id="fault">Simulate microphone sensor fault</label>
+<div class="buttons"><button class="primary" id="start">Start stream</button><button class="stop" id="stop">Stop / test stale</button></div>
+<p class="muted" id="delivery">One fresh, unretained reading every second. Changes apply while running.</p><p class="error" id="error" role="alert"></p>
+</section>
+<section class="panel"><div class="row"><h2>Live actuator feedback</h2><span class="badge" id="feedback">Waiting for board</span></div>
+<div class="grid"><div><small>Received noise</small><div class="metric" id="noise">—</div></div><div><small>Servo</small><div class="metric" id="servo">—</div></div><div><small>Press count</small><div class="metric" id="presses">—</div></div><div><small>Armed</small><div class="metric" id="armed">—</div></div><div><small>Door</small><div class="metric" id="door">—</div></div><div><small>Trigger progress</small><div class="metric" id="progress">—</div></div></div>
+<p class="muted" id="settings">Listening for your cabinet’s MQTT telemetry…</p><p class="error" id="observerError"></p>
+</section>
+<section class="panel"><h2>Try a full cycle</h2><ol><li>Select <b>65 dB</b> and press <b>Start stream</b>. Serial should show fresh noise.</li><li>Select <b>100 dB</b> and wait about 5 seconds. At the default 90 dB / 3 s trigger, the servo presses once and returns.</li><li>Leave it high: the press count should stay the same.</li><li>Select <b>65 dB</b> for at least 4 seconds after the servo returns. Armed should become Yes. Select 100 dB to trigger again.</li><li>Press <b>Stop</b>. Noise becomes stale after roughly 2.5 seconds.</li></ol><small>Your board’s saved trigger settings take precedence. The door sensor runs independently.</small></section>
+<details class="panel"><summary>Connection and last mock payload</summary><p class="muted" id="connection"></p><code id="topic"></code><pre id="payload">No readings sent yet.</pre></details>
+<p class="muted">The stream continues if you close this tab. Press Stop when finished, especially before reconnecting the real microphone.</p>
+</main><script>
+const $=id=>document.getElementById(id);let pending=false,editing=false,lastState=null;
+async function control(data){pending=true;try{const r=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const s=await r.json();if(!r.ok)throw Error(s.error||'Control failed');render(s)}catch(e){$('error').textContent=e.message}finally{pending=false}}
+function setLevel(level){$('level').value=level;$('db').textContent=level;return control({level:Number(level),fault:false}).then(()=>{$('fault').checked=false})}
+$('level').oninput=()=>{editing=true;$('db').textContent=$('level').value};$('level').onchange=async()=>{await setLevel($('level').value);editing=false};
+document.querySelectorAll('[data-level]').forEach(b=>b.onclick=()=>setLevel(b.dataset.level));
+$('fault').onchange=()=>control({fault:$('fault').checked});$('start').onclick=()=>control({enabled:true,level:Number($('level').value),fault:$('fault').checked});$('stop').onclick=()=>control({enabled:false});
+function badge(id,label,live){$(id).textContent=label;$(id).classList.toggle('live',live)}
+function render(s){lastState=s;badge('stream',s.enabled?(s.error?'Reconnecting…':s.fault?'Streaming fault':'Streaming · 1 Hz'):'Stopped',s.enabled&&!s.error);if(!editing&&!pending){$('level').value=s.level;$('db').textContent=s.level;$('fault').checked=s.fault}
+$('error').textContent=s.error;$('observerError').textContent=s.listener_error;$('delivery').textContent=`${s.sent} readings acknowledged by broker · ${s.last_sent?'Last sent '+new Date(s.last_sent*1000).toLocaleTimeString():'No readings sent'} · changes apply while running`;
+$('connection').textContent=`Broker ${s.broker} · source ${s.device}`;$('topic').textContent=s.topic;$('payload').textContent=s.last_payload?JSON.stringify(s.last_payload,null,2):'No readings sent yet.';
+const c=s.cabinet,recent=c&&Date.now()/1000-s.cabinet_at<5;badge('feedback',recent?'Board online':s.listening?'Waiting for board':'Broker disconnected',recent);
+for(const id of ['noise','servo','presses','armed','door','progress'])$(id).textContent='—';
+if(c&&recent){$('noise').textContent=c.noise_fresh?`${Number(c.noise_db).toFixed(1)} dB`:'STALE';$('servo').textContent=c.servo_phase;$('presses').textContent=c.press_count;$('armed').textContent=c.armed?'Yes':'No';$('door').textContent=c.door_state;$('progress').textContent=`${(c.qualified_ms/1000).toFixed(1)} / ${(c.sustain_ms/1000).toFixed(1)} s`;$('settings').textContent=`${c.device} · trigger ≥ ${c.trigger_db} dB for ${c.sustain_ms/1000} s · rearm below ${c.rearm_db} dB for 3 s`}
+else $('settings').textContent='Waiting for fresh cabinet telemetry. Keep the actuator powered and connected to Wi-Fi.';}
+async function refresh(){if(!pending)try{const r=await fetch('/api/status');if(!r.ok)throw Error('Status unavailable');render(await r.json())}catch(e){$('error').textContent='Interface unavailable: '+e.message}setTimeout(refresh,1000)}refresh();
+</script></body></html>
